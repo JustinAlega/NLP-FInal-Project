@@ -69,7 +69,7 @@ curl -X POST http://localhost:8000/qa/ask \
 ## 📁 Project Structure
 
 ```
-NLP Final Project/
+NLP-FInal-Project/
 ├── config.py                  # Central configuration
 ├── requirements.txt
 ├── ontology/
@@ -84,7 +84,7 @@ NLP Final Project/
 │   ├── relation_extractor.py  # Ollama-based relation extraction
 │   └── entity_resolver.py     # Deduplication & normalization
 ├── graph/
-│   └── graph_manager.py       # NetworkX KG (search, traversal, export)
+│   └── graph_manager.py       # Pure Python KG (search, traversal, export)
 ├── api/
 │   ├── main.py                # FastAPI application
 │   └── models.py              # Pydantic schemas
@@ -94,6 +94,7 @@ NLP Final Project/
 │   └── qa_chain.py            # Ollama-powered QA
 └── scripts/
     ├── seed_kg.py             # End-to-end pipeline
+    ├── test_run.py            # Quick test (no Ollama needed)
     └── demo_queries.py        # Demo query examples
 ```
 
@@ -102,3 +103,4 @@ NLP Final Project/
 **Entity Types**: Polymer, SizeClass, Source, DetectionMethod, EnvironmentalCompartment, HealthEffect, ExposurePathway, Publication
 
 **Relationship Types**: DETECTED_BY, FOUND_IN, ORIGINATES_FROM, HAS_SIZE_CLASS, CAUSES, EXPOSURE_VIA, LEADS_TO, REPORTED_IN, CO_OCCURS_WITH, AFFECTS, REGULATED_BY, MEASURED_IN
+
