@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroKG — Knowledge Graph Viewer</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0e1a;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ── Header ─────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, #0f1628 0%, #1a1f3a 100%);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .header h1 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #818cf8, #6ee7b7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+
+        .header .stats span {
+            color: #818cf8;
+            font-weight: 600;
+        }
+
+        /* ── Layout ─────────────────────────────── */
+        .container {
+            display: flex;
+            height: calc(100vh - 52px);
+        }
+
+        /* ── Sidebar ────────────────────────────── */
+        .sidebar {
+            width: 300px;
+            background: #0f1628;
+            border-right: 1px solid rgba(99, 102, 241, 0.15);
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .sidebar h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .filter-btn {
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            background: rgba(99, 102, 241, 0.08);
+            color: #c4b5fd;
+            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: rgba(99, 102, 241, 0.4);
+        }
+
+        .filter-btn.active {
+            background: rgba(99, 102, 241, 0.3);
+            border-color: #818cf8;
+            color: #e0e7ff;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            background: rgba(15, 22, 40, 0.8);
+            color: #e0e0e0;
+            font-size: 0.85rem;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: #818cf8;
+        }
+
+        /* ── Detail Panel ───────────────────────── */
+        .detail-panel {
+            background: rgba(15, 22, 40, 0.95);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 10px;
+            padding: 14px;
+            display: none;
+        }
+
+        .detail-panel.visible { display: block; }
+
+        .detail-panel .entity-name {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e0e7ff;
+            margin-bottom: 4px;
+        }
+
+        .detail-panel .entity-type {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+
+        .detail-panel .relations {
+            font-size: 0.78rem;
+            color: #94a3b8;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .detail-panel .relations div {
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.08);
+        }
+
+        .rel-type {
+            color: #fbbf24;
+            font-weight: 500;
+            font-size: 0.7rem;
+        }
+
+        /* ── Legend ──────────────────────────────── */
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.78rem;
+            color: #94a3b8;
+            padding: 2px 0;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* ── Graph ──────────────────────────────── */
+        #graph-canvas {
+            flex: 1;
+            background: #0a0e1a;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>🔬 MicroKG — Microplastics Knowledge Graph</h1>
+    <div class="stats">
+        <div>Nodes: <span id="node-count">0</span></div>
+        <div>Edges: <span id="edge-count">0</span></div>
+        <div>Components: <span id="comp-count">0</span></div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="sidebar">
+        <div>
+            <h3>Search</h3>
+            <input type="text" class="search-input" id="search" placeholder="Search entities...">
+        </div>
+
+        <div>
+            <h3>Filter by Type</h3>
+            <div class="filter-group" id="type-filters"></div>
+        </div>
+
+        <div>
+            <h3>Legend</h3>
+            <div id="legend"></div>
+        </div>
+
+        <div class="detail-panel" id="detail-panel">
+            <div class="entity-name" id="detail-name"></div>
+            <div class="entity-type" id="detail-type"></div>
+            <div style="margin-top:8px">
+                <h3>Connections</h3>
+                <div class="relations" id="detail-relations"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="graph-canvas"></div>
+</div>
+
+<script>
+// ── Color scheme per entity type ─────────────────
+const TYPE_COLORS = {
+    'Polymer':                    { bg: '#6366f1', border: '#818cf8', shape: 'dot',     size: 28 },
+    'DetectionMethod':            { bg: '#06b6d4', border: '#22d3ee', shape: 'diamond', size: 22 },
+    'EnvironmentalCompartment':   { bg: '#10b981', border: '#34d399', shape: 'dot',     size: 22 },
+    'HealthEffect':               { bg: '#ef4444', border: '#f87171', shape: 'triangle',size: 22 },
+    'ExposurePathway':            { bg: '#f59e0b', border: '#fbbf24', shape: 'star',    size: 20 },
+    'Publication':                { bg: '#8b5cf6', border: '#a78bfa', shape: 'square',  size: 18 },
+    'Source':                     { bg: '#ec4899', border: '#f472b6', shape: 'dot',     size: 20 },
+    'SizeClass':                  { bg: '#14b8a6', border: '#2dd4bf', shape: 'dot',     size: 18 },
+};
+
+const EDGE_COLORS = {
+    'FOUND_IN':        '#10b981',
+    'CAUSES':          '#ef4444',
+    'DETECTED_BY':     '#06b6d4',
+    'REPORTED_IN':     '#8b5cf680',
+    'ORIGINATES_FROM': '#ec4899',
+    'EXPOSURE_VIA':    '#f59e0b',
+    'HAS_SIZE_CLASS':  '#14b8a6',
+    'LEADS_TO':        '#f87171',
+    'CO_OCCURS_WITH':  '#6366f1',
+    'AFFECTS':         '#34d399',
+    'REGULATED_BY':    '#a78bfa',
+    'MEASURED_IN':     '#22d3ee',
+};
+
+// ── Load graph data ──────────────────────────────
+let graphData = null;
+let network = null;
+let allNodes = null;
+let allEdges = null;
+let activeFilters = new Set();
+
+async function loadGraph() {
+    try {
+        const resp = await fetch('./data/graph/microkg_graph.json');
+        graphData = await resp.json();
+    } catch (e) {
+        // Fallback: try inline data
+        console.error('Could not load graph JSON, using embedded data');
+        return;
+    }
+
+    document.getElementById('node-count').textContent = graphData.nodes.length;
+    document.getElementById('edge-count').textContent = graphData.edges.length;
+    document.getElementById('comp-count').textContent = graphData.stats?.connected_components || '?';
+
+    buildGraph();
+    buildFilters();
+    buildLegend();
+}
+
+function buildGraph() {
+    const nodes = graphData.nodes.map(n => {
+        const typeKey = n.entity_type.replace('EntityType.', '');
+        const style = TYPE_COLORS[typeKey] || TYPE_COLORS['Polymer'];
+        const label = n.name.length > 30 ? n.name.substring(0, 28) + '…' : n.name;
+
+        return {
+            id: n.id,
+            label: label,
+            title: `${typeKey}: ${n.name}`,
+            color: {
+                background: style.bg,
+                border: style.border,
+                highlight: { background: style.border, border: '#fff' },
+                hover: { background: style.border, border: '#fff' },
+            },
+            shape: style.shape,
+            size: style.size,
+            font: {
+                color: '#e0e7ff',
+                size: 11,
+                face: 'Inter',
+                strokeWidth: 3,
+                strokeColor: '#0a0e1a',
+            },
+            entityType: typeKey,
+            fullData: n,
+        };
+    });
+
+    const edges = graphData.edges.map((e, i) => {
+        const relType = e.relation_type.replace('RelationType.', '');
+        return {
+            id: 'e' + i,
+            from: e.source,
+            to: e.target,
+            label: relType,
+            color: {
+                color: EDGE_COLORS[relType] || '#4a5568',
+                opacity: relType === 'REPORTED_IN' ? 0.25 : 0.6,
+                highlight: '#fff',
+                hover: '#e0e7ff',
+            },
+            font: {
+                color: '#64748b',
+                size: 8,
+                face: 'Inter',
+                strokeWidth: 0,
+                align: 'middle',
+            },
+            arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+            smooth: { type: 'curvedCW', roundness: 0.15 },
+            width: relType === 'REPORTED_IN' ? 0.5 : 1.5,
+            relType: relType,
+        };
+    });
+
+    allNodes = new vis.DataSet(nodes);
+    allEdges = new vis.DataSet(edges);
+
+    const container = document.getElementById('graph-canvas');
+    network = new vis.Network(container, { nodes: allNodes, edges: allEdges }, {
+        physics: {
+            solver: 'forceAtlas2Based',
+            forceAtlas2Based: {
+                gravitationalConstant: -80,
+                centralGravity: 0.008,
+                springLength: 180,
+                springConstant: 0.04,
+                damping: 0.5,
+            },
+            stabilization: { iterations: 200 },
+        },
+        interaction: {
+            hover: true,
+            tooltipDelay: 100,
+            zoomView: true,
+            dragView: true,
+        },
+        layout: { improvedLayout: true },
+    });
+
+    // Click handler
+    network.on('click', params => {
+        if (params.nodes.length > 0) {
+            showDetail(params.nodes[0]);
+        } else {
+            document.getElementById('detail-panel').classList.remove('visible');
+        }
+    });
+}
+
+function showDetail(nodeId) {
+    const node = allNodes.get(nodeId);
+    if (!node) return;
+
+    const panel = document.getElementById('detail-panel');
+    const data = node.fullData;
+    const typeKey = node.entityType;
+    const style = TYPE_COLORS[typeKey] || TYPE_COLORS['Polymer'];
+
+    document.getElementById('detail-name').textContent = data.name;
+    const typeEl = document.getElementById('detail-type');
+    typeEl.textContent = typeKey;
+    typeEl.style.background = style.bg + '30';
+    typeEl.style.color = style.border;
+
+    // Find connected edges
+    const connected = allEdges.get().filter(e => e.from === nodeId || e.to === nodeId);
+    const relDiv = document.getElementById('detail-relations');
+    relDiv.innerHTML = '';
+
+    connected.forEach(edge => {
+        const isSource = edge.from === nodeId;
+        const otherNodeId = isSource ? edge.to : edge.from;
+        const otherNode = allNodes.get(otherNodeId);
+        const otherName = otherNode ? otherNode.fullData.name : otherNodeId;
+        const arrow = isSource ? '→' : '←';
+
+        const div = document.createElement('div');
+        div.innerHTML = `<span class="rel-type">${edge.relType}</span> ${arrow} ${otherName.substring(0, 40)}`;
+        div.style.cursor = 'pointer';
+        div.onclick = () => {
+            network.selectNodes([otherNodeId]);
+            network.focus(otherNodeId, { scale: 1.2, animation: true });
+            showDetail(otherNodeId);
+        };
+        relDiv.appendChild(div);
+    });
+
+    panel.classList.add('visible');
+
+    // Highlight in graph
+    network.selectNodes([nodeId]);
+    network.focus(nodeId, { scale: 1.0, animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+}
+
+function buildFilters() {
+    const types = [...new Set(graphData.nodes.map(n => n.entity_type.replace('EntityType.', '')))];
+    const container = document.getElementById('type-filters');
+
+    // "All" button
+    const allBtn = document.createElement('button');
+    allBtn.className = 'filter-btn active';
+    allBtn.textContent = `All (${graphData.nodes.length})`;
+    allBtn.onclick = () => {
+        activeFilters.clear();
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        allBtn.classList.add('active');
+        applyFilters();
+    };
+    container.appendChild(allBtn);
+
+    types.sort().forEach(type => {
+        const count = graphData.nodes.filter(n => n.entity_type.replace('EntityType.', '') === type).length;
+        const btn = document.createElement('button');
+        btn.className = 'filter-btn';
+        btn.textContent = `${type} (${count})`;
+        const style = TYPE_COLORS[type];
+        if (style) {
+            btn.style.borderColor = style.bg + '60';
+            btn.style.color = style.border;
+        }
+        btn.onclick = () => {
+            if (activeFilters.has(type)) {
+                activeFilters.delete(type);
+                btn.classList.remove('active');
+            } else {
+                activeFilters.add(type);
+                btn.classList.add('active');
+            }
+            allBtn.classList.toggle('active', activeFilters.size === 0);
+            applyFilters();
+        };
+        container.appendChild(btn);
+    });
+}
+
+function applyFilters() {
+    if (activeFilters.size === 0) {
+        allNodes.forEach(n => allNodes.update({ id: n.id, hidden: false }));
+        allEdges.forEach(e => allEdges.update({ id: e.id, hidden: false }));
+        return;
+    }
+
+    allNodes.forEach(n => {
+        const visible = activeFilters.has(n.entityType);
+        allNodes.update({ id: n.id, hidden: !visible });
+    });
+
+    allEdges.forEach(e => {
+        const fromVisible = !allNodes.get(e.from)?.hidden;
+        const toVisible = !allNodes.get(e.to)?.hidden;
+        allEdges.update({ id: e.id, hidden: !(fromVisible && toVisible) });
+    });
+}
+
+function buildLegend() {
+    const container = document.getElementById('legend');
+    Object.entries(TYPE_COLORS).forEach(([type, style]) => {
+        const div = document.createElement('div');
+        div.className = 'legend-item';
+        div.innerHTML = `<div class="legend-dot" style="background:${style.bg}"></div>${type}`;
+        container.appendChild(div);
+    });
+}
+
+// Search
+document.getElementById('search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    if (!q) {
+        allNodes.forEach(n => allNodes.update({ id: n.id, hidden: false }));
+        allEdges.forEach(e2 => allEdges.update({ id: e2.id, hidden: false }));
+        return;
+    }
+    allNodes.forEach(n => {
+        const match = n.fullData.name.toLowerCase().includes(q) ||
+                      (n.fullData.aliases || []).some(a => a.toLowerCase().includes(q));
+        allNodes.update({ id: n.id, hidden: !match, opacity: match ? 1 : 0.15 });
+    });
+});
+
+// Init
+loadGraph();
+</script>
+</body>
+</html>
