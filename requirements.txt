@@ -1,0 +1,28 @@
+# MicroKG - Microplastics Knowledge Graph
+# =========================================
+
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.0
+
+# Data Ingestion
+biopython>=1.84            # PubMed E-Utilities API
+PyMuPDF>=1.24.0            # PDF text extraction
+requests>=2.31
+
+# NLP & LLM (Ollama - local)
+ollama>=0.4.0              # Ollama Python client
+tiktoken>=0.7              # Token counting
+sentence-transformers>=3.0 # Local embeddings
+
+# Knowledge Graph (pure Python, no external deps)
+# networkx removed due to Python 3.14 incompatibility
+
+# API
+fastapi>=0.111
+uvicorn>=0.30
+
+# Utilities
+pandas>=2.2
+numpy>=1.26
+tqdm>=4.66
