@@ -9,7 +9,7 @@ import re
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -39,23 +39,45 @@ class ReadableHtmlParser(HTMLParser):
         self._title = ""
         self._in_title = False
         self._parts: list[str] = []
+        self._meta: dict[str, str] = {}
+        self._json_ld: list[str] = []
+        self._in_json_ld = False
 
     def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
         if tag in {"script", "style", "noscript", "svg"}:
             self._skip_depth += 1
+        if tag == "script" and attrs_dict.get("type") == "application/ld+json":
+            self._in_json_ld = True
+            self._skip_depth = max(0, self._skip_depth - 1)
         if tag == "title":
             self._in_title = True
+        if tag == "meta":
+            key = (
+                attrs_dict.get("name")
+                or attrs_dict.get("property")
+                or attrs_dict.get("itemprop")
+                or ""
+            ).lower()
+            value = attrs_dict.get("content", "").strip()
+            if key and value:
+                self._meta[key] = value
         if tag in {"p", "br", "div", "section", "article", "li", "h1", "h2", "h3"}:
             self._parts.append("\n")
 
     def handle_endtag(self, tag):
         if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
             self._skip_depth -= 1
+        if tag == "script":
+            self._in_json_ld = False
         if tag == "title":
             self._in_title = False
 
     def handle_data(self, data):
         text = data.strip()
+        if self._in_json_ld and text:
+            self._json_ld.append(text)
+            return
         if not text or self._skip_depth:
             return
         if self._in_title:
@@ -64,13 +86,42 @@ class ReadableHtmlParser(HTMLParser):
 
     @property
     def title(self) -> str:
-        return self._title
+        return (
+            self._meta.get("citation_title")
+            or self._meta.get("dc.title")
+            or self._meta.get("og:title")
+            or self._title
+        )
+
+    @property
+    def abstract(self) -> str:
+        for key in (
+            "citation_abstract",
+            "dc.description",
+            "description",
+            "og:description",
+            "twitter:description",
+        ):
+            if self._meta.get(key):
+                return self._meta[key]
+        return ""
+
+    @property
+    def doi(self) -> str:
+        doi = self._meta.get("citation_doi") or self._meta.get("dc.identifier")
+        if doi:
+            return doi.replace("doi:", "").strip()
+        return ""
+
+    @property
+    def source(self) -> str:
+        return self._meta.get("citation_journal_title") or self._meta.get("dc.source") or ""
 
     @property
     def text(self) -> str:
         text = " ".join(self._parts)
         text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        return _clean_article_text(text)
 
 
 def ingest_url_to_graph(url: str, graph, max_chunks: int = 3) -> dict:
@@ -80,9 +131,14 @@ def ingest_url_to_graph(url: str, graph, max_chunks: int = 3) -> dict:
 
     doc = _document_from_pubmed_url(url)
     if doc is None:
-        response = requests.get(url, timeout=20, headers={"User-Agent": "MicroKG/1.0"})
-        response.raise_for_status()
-        doc = _document_from_response(url, response)
+        try:
+            response = requests.get(url, timeout=20, headers=_request_headers())
+            response.raise_for_status()
+            doc = _document_from_response(url, response)
+        except requests.HTTPError as exc:
+            if exc.response is None or exc.response.status_code not in {401, 403, 429}:
+                raise
+            doc = _document_from_reader_url(url)
     chunks = chunk_document(doc)[:max_chunks]
     if not chunks:
         raise ValueError("No readable text was found at that URL")
@@ -173,7 +229,8 @@ def _document_from_pubmed_url(url: str) -> dict | None:
 
 def _document_from_response(url: str, response: requests.Response) -> dict:
     content_type = response.headers.get("content-type", "").lower()
-    doc_id = f"url:{hashlib.sha1(url.encode('utf-8')).hexdigest()[:12]}"
+    stable_id = _doi_from_url(url) or url
+    doc_id = f"url:{hashlib.sha1(stable_id.encode('utf-8')).hexdigest()[:12]}"
 
     if "application/pdf" in content_type or url.lower().endswith(".pdf"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -194,13 +251,150 @@ def _document_from_response(url: str, response: requests.Response) -> dict:
     parser = ReadableHtmlParser()
     parser.feed(response.text)
     title = parser.title or urlparse(url).netloc or url
+    readable_text = _best_readable_text(parser)
+    doi = parser.doi or _doi_from_url(url) or url
+    metadata = _crossref_metadata(doi) if doi and not doi.startswith(("http", "pii:")) else {}
+    if _is_bad_title(title) and metadata.get("title"):
+        title = metadata["title"]
+    if len(readable_text.split()) < 40 and metadata.get("abstract"):
+        readable_text = metadata["abstract"]
+    source = _source_from_url(url, parser.source)
 
     return {
         "id": doc_id,
         "title": title,
-        "abstract": parser.text,
-        "doi": url,
+        "abstract": readable_text,
+        "doi": doi,
+        "source": source,
     }
+
+
+def _document_from_reader_url(url: str) -> dict:
+    """Fetch pages blocked to direct requests through a public reader endpoint."""
+    reader_url = f"https://r.jina.ai/{url}"
+    response = requests.get(reader_url, timeout=30, headers=_request_headers())
+    response.raise_for_status()
+
+    text = _clean_article_text(response.text)
+    title = _title_from_reader_text(text) or urlparse(url).netloc or url
+    stable_id = _doi_from_url(url) or url
+    metadata = _crossref_metadata(stable_id) if stable_id and not stable_id.startswith(("http", "pii:")) else {}
+    if _is_bad_title(title) and metadata.get("title"):
+        title = metadata["title"]
+    if len(text.split()) < 40 and metadata.get("abstract"):
+        text = metadata["abstract"]
+
+    return {
+        "id": f"url:{hashlib.sha1(stable_id.encode('utf-8')).hexdigest()[:12]}",
+        "title": title,
+        "abstract": text,
+        "doi": _doi_from_url(url) or url,
+        "source": _source_from_url(url),
+    }
+
+
+def _request_headers() -> dict:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36 MicroKG/1.0"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+
+def _best_readable_text(parser: ReadableHtmlParser) -> str:
+    if len(parser.abstract.split()) >= 25:
+        return parser.abstract
+    return parser.text
+
+
+def _doi_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+
+    doi_match = re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", path)
+    if doi_match:
+        return doi_match.group(0).rstrip("/")
+
+    pii_match = re.search(r"/pii/([A-Za-z0-9]+)", path)
+    if pii_match:
+        return f"pii:{pii_match.group(1)}"
+
+    return ""
+
+
+def _source_from_url(url: str, fallback: str = "") -> str:
+    host = urlparse(url).netloc.lower()
+    if "pubs.acs.org" in host:
+        return "ACS Publications"
+    if "sciencedirect.com" in host:
+        return "ScienceDirect"
+    if "elsevier" in host:
+        return "Elsevier"
+    if "pubmed.ncbi.nlm.nih.gov" in host:
+        return "PubMed"
+    return fallback or host
+
+
+def _clean_article_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", text)
+    repeated_noise = [
+        "Skip to main content",
+        "Access through your institution",
+        "Sign in",
+        "Register",
+        "Purchase PDF",
+        "View PDF",
+        "Download PDF",
+        "Cookie",
+        "Copyright",
+    ]
+    for phrase in repeated_noise:
+        text = text.replace(phrase, " ")
+
+    abstract_match = re.search(
+        r"(Abstract|Summary)\s+(.*?)(Introduction|Graphical abstract|Keywords|Section snippets|References)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if abstract_match and len(abstract_match.group(2).split()) >= 40:
+        return _clean_article_text(abstract_match.group(2))
+
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _title_from_reader_text(text: str) -> str:
+    match = re.search(r"(?:^|\s)Title:\s*(.*?)(?:\s+URL Source:|\s+Markdown Content:|$)", text)
+    if match:
+        return match.group(1).strip()
+    heading = re.search(r"#\s+(.+)", text)
+    return heading.group(1).strip() if heading else ""
+
+
+def _is_bad_title(title: str) -> bool:
+    lowered = title.lower().strip()
+    return not lowered or lowered in {"just a moment...", "access denied", "attention required"}
+
+
+def _crossref_metadata(doi: str) -> dict:
+    try:
+        response = requests.get(
+            f"https://api.crossref.org/works/{doi}",
+            timeout=15,
+            headers=_request_headers(),
+        )
+        response.raise_for_status()
+        message = response.json().get("message", {})
+        titles = message.get("title", [])
+        abstracts = message.get("abstract", "")
+        return {
+            "title": titles[0] if titles else "",
+            "abstract": _clean_article_text(re.sub(r"<[^>]+>", " ", abstracts)) if abstracts else "",
+        }
+    except Exception:
+        return {}
 
 
 def _publication_entity(doc: dict) -> Entity:
@@ -212,7 +406,10 @@ def _publication_entity(doc: dict) -> Entity:
         id=f"{EntityType.PUBLICATION.value}:{normalized}",
         entity_type=EntityType.PUBLICATION.value,
         name=title,
-        attributes={"url": doc.get("doi", "")},
+        attributes={
+            "url": doc.get("doi", ""),
+            "source": doc.get("source", ""),
+        },
         confidence=1.0,
         source_doc=doc["id"],
     )

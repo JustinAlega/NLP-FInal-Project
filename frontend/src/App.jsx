@@ -372,7 +372,7 @@ function LinkGraphPage() {
       <header className="page-header">
         <p className="eyebrow">Build From Link</p>
         <h1>Paste a link and generate a graph</h1>
-        <p>Use a PubMed paper URL to build a focused knowledge graph from that source.</p>
+        <p>Use a PubMed, ACS, ScienceDirect, DOI, HTML article, or PDF URL to build a focused graph.</p>
       </header>
 
       <section className="control-card">
@@ -381,7 +381,7 @@ function LinkGraphPage() {
             type="url"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://pubmed.ncbi.nlm.nih.gov/39692326/"
+            placeholder="Paste a PubMed, ACS, ScienceDirect, DOI, article, or PDF link"
             required
           />
           <button type="submit" disabled={loading}>
@@ -419,7 +419,7 @@ function App() {
         <div>
           <p className="eyebrow">MicroKG</p>
           <h1>Microplastics Knowledge Graph</h1>
-          <p>Explore seeded research graphs or generate one from a PubMed link.</p>
+          <p>Explore seeded research graphs or generate one from a research article link.</p>
         </div>
         <nav className="screen-nav" aria-label="App pages">
           <button
