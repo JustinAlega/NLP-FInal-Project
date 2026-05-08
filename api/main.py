@@ -16,7 +16,9 @@ from typing import Optional
 from api.models import (
     EntityResponse, NeighborhoodResponse, PathResponse,
     GraphStatsResponse, QARequest, QAResponse,
+    UrlIngestRequest, UrlIngestResponse,
 )
+from api.url_ingestion import ingest_url_to_graph
 from graph.graph_manager import get_graph
 from rag.qa_chain import QAChain
 from config import API_HOST, API_PORT
@@ -73,15 +75,6 @@ def search_entities(
     return {"count": len(results), "entities": results}
 
 
-@app.get("/entities/{entity_id:path}")
-def get_entity(entity_id: str):
-    """Get entity details by ID."""
-    entity = get_graph().get_entity(entity_id)
-    if not entity:
-        raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
-    return entity
-
-
 @app.get("/entities/{entity_id:path}/neighbors")
 def get_neighbors(
     entity_id: str,
@@ -92,6 +85,15 @@ def get_neighbors(
     if not get_graph().get_entity(entity_id):
         raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
     return get_graph().get_neighbors(entity_id, hops=hops, direction=direction)
+
+
+@app.get("/entities/{entity_id:path}")
+def get_entity(entity_id: str):
+    """Get entity details by ID."""
+    entity = get_graph().get_entity(entity_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+    return entity
 
 
 # ── Graph Traversal ───────────────────────────────────────────
@@ -132,6 +134,21 @@ def ask_question(req: QARequest):
         sources=result.get("sources", []),
         triples_used=result.get("triples_used", 0),
     )
+
+
+# ── URL Ingestion ─────────────────────────────────────────────
+
+@app.post("/ingest/url", response_model=UrlIngestResponse)
+def ingest_url(req: UrlIngestRequest):
+    """Build a small knowledge graph slice from a pasted URL."""
+    try:
+        return ingest_url_to_graph(
+            url=req.url,
+            graph=get_graph(),
+            max_chunks=req.max_chunks,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Run ───────────────────────────────────────────────────────

@@ -59,3 +59,19 @@ class QAResponse(BaseModel):
     answer: str
     sources: list[dict] = []
     triples_used: int = 0
+
+
+class UrlIngestRequest(BaseModel):
+    url: str = Field(..., min_length=8, description="Public URL to extract into the graph")
+    max_chunks: int = Field(default=3, ge=1, le=8)
+
+
+class UrlIngestResponse(BaseModel):
+    url: str
+    title: str = ""
+    doc_id: str
+    chunks_processed: int
+    entities_added: int
+    relations_added: int
+    nodes: list[dict] = []
+    edges: list[dict] = []

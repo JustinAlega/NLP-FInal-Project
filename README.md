@@ -14,6 +14,7 @@ PubMed Papers → NLP Extraction (Ollama) → Entity Resolution → Knowledge Gr
 - **Extraction**: LLM-based NER & relation extraction via Ollama
 - **Graph**: NetworkX-based KG with JSON/GraphML export
 - **API**: FastAPI REST endpoints for search, traversal, QA
+- **Frontend**: React + Vite explorer for graph search and QA
 - **RAG**: Hybrid graph + vector retrieval with Ollama-powered QA
 
 ## 📋 Prerequisites
@@ -44,6 +45,12 @@ python scripts/demo_queries.py
 python api/main.py
 # → API available at http://localhost:8000
 # → Interactive docs at http://localhost:8000/docs
+
+# 6. Start the React frontend
+cd frontend
+npm install
+npm run dev
+# → App available at http://localhost:5173
 ```
 
 ## 📡 API Endpoints
@@ -57,6 +64,31 @@ python api/main.py
 | GET | `/graph/path?source=...&target=...` | Shortest path |
 | GET | `/graph/subgraph?entity_type=Polymer` | Type subgraph |
 | POST | `/qa/ask` | RAG-powered QA |
+| POST | `/ingest/url` | Extract a graph slice from a pasted URL |
+
+## 🖥️ React Frontend
+
+The `frontend/` app is a small Vite React client for the existing FastAPI backend. It has two
+screens:
+
+- **Explore Graph**: search entities, inspect neighborhoods, and ask questions.
+- **Build From Link**: paste a public article or PDF URL and preview the graph slice extracted
+  from that source.
+
+During local development it proxies `/api/*` requests to `http://localhost:8000`, so start the API
+first:
+
+```bash
+python api/main.py
+cd frontend
+npm run dev
+```
+
+To point the frontend at a different backend URL, set `VITE_API_URL` before running Vite:
+
+```bash
+VITE_API_URL=http://localhost:8000 npm run dev
+```
 
 ## 🧪 Example QA
 
@@ -88,6 +120,7 @@ NLP-FInal-Project/
 ├── api/
 │   ├── main.py                # FastAPI application
 │   └── models.py              # Pydantic schemas
+├── frontend/                  # React + Vite graph explorer
 ├── rag/
 │   ├── embeddings.py          # Sentence-transformer embeddings
 │   ├── retriever.py           # Hybrid graph+vector retriever

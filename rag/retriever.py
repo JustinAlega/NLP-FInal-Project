@@ -29,7 +29,7 @@ class HybridRetriever:
     def build_index(self):
         """Build vector index from graph node descriptions."""
         texts, metas = [], []
-        for node_id, data in self.kg.graph.nodes(data=True):
+        for node_id, data in self._iter_nodes():
             name = data.get("name", "")
             etype = data.get("entity_type", "")
             attrs = data.get("attributes", {})
@@ -42,6 +42,14 @@ class HybridRetriever:
             self.vector_index.add_batch(texts, metas)
             self._indexed = True
             logger.info(f"Built vector index with {len(texts)} entries")
+
+    def _iter_nodes(self):
+        """Support both the current pure-Python graph and older NetworkX-backed graphs."""
+        if hasattr(self.kg, "graph"):
+            yield from self.kg.graph.nodes(data=True)
+            return
+
+        yield from self.kg._nodes.items()
 
     def retrieve(self, query: str, top_k: int = 10, hops: int = 1) -> dict:
         """
